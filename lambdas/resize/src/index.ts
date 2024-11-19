@@ -9,7 +9,7 @@ import {
   SendMessageCommandInput,
 } from "@aws-sdk/client-sqs";
 
-const QUEUE_URL = process.env.QUE_URL;
+const QUEUE_URL = process.env.QUEUE_URL;
 const PROCESS = "resize";
 
 export const handler: S3Handler = async (event: S3Event) => {
