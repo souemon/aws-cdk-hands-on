@@ -7,6 +7,8 @@ import path from "path";
 const PROCESS = "grayscale";
 
 export const handler: SQSHandler = async (event: SQSEvent) => {
+  console.log(JSON.stringify(event, null, 2));
+
   const s3Client = new S3Client();
   for (const record of event.Records) {
     // 1. download an object from S3
@@ -19,6 +21,8 @@ export const handler: SQSHandler = async (event: SQSEvent) => {
 
     const image = await getImageFromS3(s3Client, bucketName, key);
 
+    // 2. process the image
+    console.log(`${PROCESS} the image: ${key}`);
     image.greyscale();
 
     // 3. upload an object to S3
