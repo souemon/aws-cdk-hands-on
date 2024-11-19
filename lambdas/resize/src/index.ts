@@ -1,11 +1,20 @@
 import { S3Handler, S3Event } from "aws-lambda";
 import { S3Client } from "@aws-sdk/client-s3";
 import { getImageFromS3, putImageToS3 } from "../../common/src/index";
+import { S3Message } from "../../common/src/types";
 import path from "path";
+import {
+  SendMessageCommand,
+  SQSClient,
+  SendMessageCommandInput,
+} from "@aws-sdk/client-sqs";
 
+const QUEUE_URL = process.env.QUE_URL;
 const PROCESS = "resize";
 
 export const handler: S3Handler = async (event: S3Event) => {
+  console.log(JSON.stringify(event, null, 2));
+
   const s3Client = new S3Client();
   for (const record of event.Records) {
     // 1. download an object from S3
@@ -33,5 +42,17 @@ export const handler: S3Handler = async (event: S3Event) => {
     const uploadKey = `${PROCESS}/${parsedKey.name}-${PROCESS}${parsedKey.ext}`;
 
     await putImageToS3(s3Client, bucketName, uploadKey, imageBuffer);
+
+    // 4. send message to SQS
+    const s3Message: S3Message = { bucketName, key: uploadKey };
+    // sqs client
+    const sqsClient = new SQSClient();
+    const input: SendMessageCommandInput = {
+      QueueUrl: QUEUE_URL,
+      MessageBody: JSON.stringify(s3Message),
+    };
+    const command: SendMessageCommand = new SendMessageCommand(input);
+    await sqsClient.send(command);
+    console.log(`sent the message to SQS: ${JSON.stringify(s3Message)}`);
   }
 };
