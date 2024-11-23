@@ -4,9 +4,11 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import * as path from "path";
 import * as lambda from "aws-cdk-lib/aws-lambda";
-import { LambdaDestination } from "aws-cdk-lib/aws-s3-notifications";
+import { SnsDestination } from "aws-cdk-lib/aws-s3-notifications";
 import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as sns from "aws-cdk-lib/aws-sns";
 import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
+import { SqsSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 
 const REPOSITORY_TOP = path.join(__dirname, "../");
 const PREFIX = "aws-cdk-ts";
@@ -22,6 +24,17 @@ export class AwsCdkHandsOnStack extends cdk.Stack {
     });
 
     // SQS
+    const dlqResize = new sqs.Queue(this, `${PREFIX}-dlq-resize`, {
+      queueName: `${PREFIX}-dlq-resize`,
+    });
+    const queueResize = new sqs.Queue(this, `${PREFIX}-queue-resize`, {
+      queueName: `${PREFIX}-queue-resize`,
+      deadLetterQueue: {
+        queue: dlqResize,
+        maxReceiveCount: 1,
+      },
+    });
+
     const dlqGrayscale = new sqs.Queue(this, `${PREFIX}-dlq-grayscale`, {
       queueName: `${PREFIX}-dlq-grayscale`,
     });
@@ -32,6 +45,20 @@ export class AwsCdkHandsOnStack extends cdk.Stack {
         maxReceiveCount: 1,
       },
     });
+
+    // SNS
+    const topic = new sns.Topic(this, `${PREFIX}-topic`, {
+      topicName: `${PREFIX}`,
+      displayName: `${PREFIX}`,
+    });
+    bucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED,
+      new SnsDestination(topic),
+      { prefix: "original/" }
+    );
+    topic.addSubscription(
+      new SqsSubscription(queueResize, { rawMessageDelivery: true })
+    );
 
     // lambda: resize
     const resizeLambda = new NodejsFunction(this, `${PREFIX}-lambda-resize`, {
@@ -47,13 +74,8 @@ export class AwsCdkHandsOnStack extends cdk.Stack {
     });
     bucket.grantPut(resizeLambda);
     bucket.grantReadWrite(resizeLambda);
+    resizeLambda.addEventSource(new SqsEventSource(queueResize));
     queueGrayscale.grantSendMessages(resizeLambda);
-
-    bucket.addEventNotification(
-      s3.EventType.OBJECT_CREATED,
-      new LambdaDestination(resizeLambda),
-      { prefix: "original/" }
-    );
 
     // lambda: grayscale
     const grayscaleLambda = new NodejsFunction(
