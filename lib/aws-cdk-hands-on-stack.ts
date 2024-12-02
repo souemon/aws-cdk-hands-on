@@ -46,6 +46,28 @@ export class AwsCdkHandsOnStack extends cdk.Stack {
       },
     });
 
+    const dlqBlur = new sqs.Queue(this, `${PREFIX}-dlq-blur`, {
+      queueName: `${PREFIX}-dlq-blur`,
+    });
+    const queueBlur = new sqs.Queue(this, `${PREFIX}-queue-blur`, {
+      queueName: `${PREFIX}-queue-blur`,
+      deadLetterQueue: {
+        queue: dlqBlur,
+        maxReceiveCount: 1,
+      },
+    });
+
+    const dlqRotate = new sqs.Queue(this, `${PREFIX}-dlq-rotate`, {
+      queueName: `${PREFIX}-dlq-rotate`,
+    });
+    const queueRotate = new sqs.Queue(this, `${PREFIX}-queue-rotate`, {
+      queueName: `${PREFIX}-queue-rotate`,
+      deadLetterQueue: {
+        queue: dlqRotate,
+        maxReceiveCount: 1,
+      },
+    });
+
     // SNS
     const topic = new sns.Topic(this, `${PREFIX}-topic`, {
       topicName: `${PREFIX}`,
@@ -58,6 +80,9 @@ export class AwsCdkHandsOnStack extends cdk.Stack {
     );
     topic.addSubscription(
       new SqsSubscription(queueResize, { rawMessageDelivery: true })
+    );
+    topic.addSubscription(
+      new SqsSubscription(queueBlur, { rawMessageDelivery: true })
     );
 
     // lambda: resize
@@ -93,5 +118,35 @@ export class AwsCdkHandsOnStack extends cdk.Stack {
     bucket.grantPut(grayscaleLambda);
     bucket.grantReadWrite(grayscaleLambda);
     grayscaleLambda.addEventSource(new SqsEventSource(queueGrayscale));
+
+    // lambda: blur
+    const blurLambda = new NodejsFunction(this, `${PREFIX}-lambda-blur`, {
+      functionName: `${PREFIX}-blur`,
+      entry: path.join(REPOSITORY_TOP, "lambdas/blur/src/index.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_20_X,
+      memorySize: 128,
+      timeout: cdk.Duration.seconds(30),
+      environment: {
+        QUEUE_URL: queueRotate.queueUrl,
+      },
+    });
+    bucket.grantPut(blurLambda);
+    bucket.grantReadWrite(blurLambda);
+    blurLambda.addEventSource(new SqsEventSource(queueBlur));
+    queueRotate.grantSendMessages(blurLambda);
+
+    // lambda: rotate
+    const rotateLambda = new NodejsFunction(this, `${PREFIX}-lambda-rotate`, {
+      functionName: `${PREFIX}-rotate`,
+      entry: path.join(REPOSITORY_TOP, "lambdas/rotate/src/index.ts"),
+      handler: "handler",
+      runtime: lambda.Runtime.NODEJS_20_X,
+      memorySize: 128,
+      timeout: cdk.Duration.seconds(30),
+    });
+    bucket.grantPut(rotateLambda);
+    bucket.grantReadWrite(rotateLambda);
+    rotateLambda.addEventSource(new SqsEventSource(queueRotate));
   }
 }
